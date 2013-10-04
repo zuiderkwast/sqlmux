@@ -1,0 +1,5 @@
+{application, sqlmux, [
+  {description, "Library to merge similar SQL queries to avoid the n+1 query problem"},
+  {vsn, "1.0.0"},
+  {applications, [kernel, stdlib]}
+]}.

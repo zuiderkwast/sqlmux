@@ -5,7 +5,7 @@
 %%
 %% Note that dynamic SQL generation is often considered bad practice, especially when done in an
 %% uncontrolled manner.
--module(sqlbatch).
+-module(sqlmux).
 
 -export([create_query/3, create_query/4, sqlquery_to_iolist/2,
          query_all/3, query_some/3]).
@@ -21,7 +21,7 @@
 %% expression. E.g. for strings, quotes should be added and special characters escaped.
 -type escape_fun() :: fun((term()) -> iolist()).
 
--include("sqlbatch.hrl").
+-include("sqlmux.hrl").
 
 -type sqlquery() :: #sqlquery{}.
 
@@ -30,7 +30,7 @@
 create_query(Select, From, Where) ->
 	#sqlquery{select = Select, from = From, where = Where}.
 
-%% @doc Constructs a sqlquery(). If you include sqlbatch.hrl, you can also use the record
+%% @doc Constructs a sqlquery(). If you include sqlmux.hrl, you can also use the record
 %% #sqlquery{} directly.
 %%
 %% Select is a list of columns to select. These should be strings/binaries/iolists without any

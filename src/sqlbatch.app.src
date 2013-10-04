@@ -1,5 +1,0 @@
-{application, sqlbatch, [
-  {description, "Library to merge SQL queries to solve the n+1 query problem"},
-  {vsn, "1.0.0"},
-  {applications, [kernel, stdlib]}
-]}.
