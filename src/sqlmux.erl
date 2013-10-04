@@ -11,9 +11,13 @@
          query_all/3, query_some/3]).
 -export_type([query_fun/0, query_id/0, escape_fun/0, sqlquery/0, where_cond/0]).
 
+%% @doc Either a nested list of values (list of rows) or a pair with the field names and the nested
+%% list of values.
+-type query_result() :: [[term()]] | {[term()], [[term()]]}.
+
 %% @doc Any function that takes an SQL query in the form of an iolist(), sends it to a database and
-%% returns the rows in the form of a nested list of values.
--type query_fun() :: fun((iolist()) -> [[term()]]).
+%% returns the rows in the form of query result.
+-type query_fun() :: fun((iolist()) -> query_result()).
 
 -type query_id() :: term().
 
@@ -82,15 +86,15 @@ query_all(QueryFun, QuoteFun, QueryList, Acc) ->
 %% executed. At least one query will be answered. QueryFun should take an SQL query and return the
 %% rows.
 -spec query_some(query_fun(), escape_fun(), [{query_id(), Query :: sqlquery()}, ...]) ->
-	[{query_id(), Rows :: [[term()]]}].
+	[{query_id(), query_result()}].
 query_some(QueryFun, QuoteFun, QueryList) ->
 	{Query, VaryCol, VaryValues, Qids} = merge_some(QueryList),
 	case VaryValues of
 		[] ->
 			%% There is no varying col. Perform the query and return the same for all.
 			Sql = sqlquery_to_iolist(QuoteFun, Query),
-			Rows = QueryFun(Sql),
-			[{Qid, Rows} || Qid <- Qids];
+			Result = QueryFun(Sql),
+			[{Qid, Result} || Qid <- Qids];
 		_ ->
 			%% There is a varying col. Prepend it to the query.
 			Select = [VaryCol|Query#sqlquery.select],
@@ -100,13 +104,17 @@ query_some(QueryFun, QuoteFun, QueryList) ->
 			Where = [In|Query#sqlquery.where],
 			Query1 = Query#sqlquery{select = Select, where  = Where},
 			Sql = sqlquery_to_iolist(QuoteFun, Query1),
-			Rows = QueryFun(Sql),
-			%% Extract the first value in each row and divide the rows on the answered
-			%% queries.
-			VaryValuesAndRows = [{X, Xs} || [X|Xs] <- Rows],
-			AnsweredQueries = lists:filter(fun({Qid, _}) -> lists:member(Qid, Qids) end,
-			                               QueryList),
-			distribute_rows(VaryCol, VaryValuesAndRows, AnsweredQueries)
+			case QueryFun(Sql) of
+				Rows when is_list(Rows) ->
+					distribute_rows_on_answered_queries(Rows, VaryCol,
+					                                    QueryList, Qids);
+				{Fields, Rows} ->
+					distribute_fields_and_rows_on_answered_queries(Fields,
+					                                               Rows,
+					                                               VaryCol,
+					                                               QueryList,
+					                                               Qids)
+			end
 	end.
 
 %% @doc Merges multiple SQL queries differing only in one condition in the WHERE clauses on the
@@ -133,6 +141,25 @@ merge_some([{Id, Query}|Queries], Batch, WhereCol, WhereValues, Ids) ->
 	end;
 merge_some([], Batch, WhereCol, WhereValues, Ids) ->
 	{Batch, WhereCol, lists:reverse(WhereValues), lists:reverse(Ids)}.
+
+%% @doc Helper for query_some/3. Drops the varying first column (the varying column) from Fields and
+%% Rows after using it to distribute the results according to the queries.
+distribute_fields_and_rows_on_answered_queries([_|Fields], AllRows, VaryCol, AllQueriesByQid,
+                                               AnsweredQids) ->
+	RowsByQid = distribute_rows_on_answered_queries(AllRows, VaryCol, AllQueriesByQid,
+	                                                AnsweredQids),
+	[{Qid, {Fields, Rows}} || {Qid, Rows} <- RowsByQid].
+
+%% @doc Helper for query_some/3. Drops the varying first column (the varying column) from Rows after
+%% using it to distribute the results according to the queries.
+distribute_rows_on_answered_queries(Rows, VaryCol, AllQueriesByQid, AnsweredQids) ->
+	%% Extract the first value in each row and divide the rows on the answered
+	%% queries.
+	VaryValuesAndRows = [{X, Xs} || [X|Xs] <- Rows],
+	AnsweredQueries = lists:filter(fun({Qid, _}) -> lists:member(Qid, AnsweredQids) end,
+	                               AllQueriesByQid),
+	distribute_rows(VaryCol, VaryValuesAndRows, AnsweredQueries).
+
 
 %% @doc Divedes the results of a merged "col IN (...)" query onto different "col = ..." queries. The
 %% queries are assumed to match, apart from the varying column VaryCol which is checked against the
@@ -216,23 +243,27 @@ join(Sep, [X|Xs]) -> [X, Sep | join(Sep, Xs)].
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-my_query(Query) ->
+query_rows(Query) ->
+	{_, Rows} = query_fields_and_rows(Query),
+	Rows.
+
+query_fields_and_rows(Query) ->
 	case list_to_binary(Query) of
 		<<"SELECT bar,a FROM foo WHERE bar IN ('baz','jar') AND foo=42">> ->
-			[["baz", 2], ["jar", 333]];
+			{["bar", "a"], [["baz", 2], ["jar", 333]]};
 		<<"SELECT c FROM foo WHERE foo=42 AND bar='jar'">> ->
-			[[999]]
+			{["c"], [[999]]}
 	end.
 
-my_quote(X) when is_integer(X)            -> integer_to_list(X);
-my_quote(X) when is_binary(X); is_list(X) -> [<<"'">>, X, <<"'">>].
+quoting_fun(X) when is_integer(X)            -> integer_to_list(X);
+quoting_fun(X) when is_binary(X); is_list(X) -> [<<"'">>, X, <<"'">>].
 
 sqlquery_to_iolist_test() ->
 	Q = #sqlquery{select = ["a", "b", "c"],
 	            from   = "foo",
 	            where  = ["a > 0", {"b", 5}],
 	            other  = "ORDER BY c"},
-	Sql = sqlquery_to_iolist(fun my_quote/1, Q),
+	Sql = sqlquery_to_iolist(fun quoting_fun/1, Q),
 	<<"SELECT a,b,c FROM foo WHERE a > 0 AND b=5 ORDER BY c">> = list_to_binary(Sql).
 
 merge_some_test() ->
@@ -246,15 +277,20 @@ query_some_test() ->
 	Q2 = #sqlquery{select = ["a"], from = "foo", where = [{"foo", 42}, {"bar", "jar"}]},
 	Q3 = #sqlquery{select = ["b"], from = "foo", where = [{"foo", 42}, {"bar", "jar"}]},
 	Queries = [{1, Q1}, {2, Q2}, {3, Q3}],
-	Result = query_some(fun my_query/1, fun my_quote/1, Queries),
-	[{1, [[2]]}, {2, [[333]]}] = Result.
+	Result = query_some(fun query_rows/1, fun quoting_fun/1, Queries),
+	?assertEqual([{1, [[2]]}, {2, [[333]]}], Result),
+	ResultAsPairs = query_some(fun query_fields_and_rows/1, fun quoting_fun/1, Queries),
+	?assertEqual([{1, {["a"], [[2]]}}, {2, {["a"], [[333]]}}], ResultAsPairs).
 
 query_all_test() ->
 	Q1 = #sqlquery{select = ["a"], from = "foo", where = [{"foo", 42}, {"bar", "baz"}]},
 	Q2 = #sqlquery{select = ["a"], from = "foo", where = [{"foo", 42}, {"bar", "jar"}]},
 	Q3 = #sqlquery{select = ["c"], from = "foo", where = [{"foo", 42}, {"bar", "jar"}]},
 	Queries = [{1, Q1}, {2, Q2}, {3, Q3}],
-	Result = query_all(fun my_query/1, fun my_quote/1, Queries),
-	[{1, [[2]]}, {2, [[333]]}, {3, [[999]]}] = Result.
+	Result = query_all(fun query_rows/1, fun quoting_fun/1, Queries),
+	?assertEqual([{1, [[2]]}, {2, [[333]]}, {3, [[999]]}], Result),
+	ResultAsPairs = query_all(fun query_fields_and_rows/1, fun quoting_fun/1, Queries),
+	?assertEqual([{1, {["a"], [[2]]}}, {2, {["a"], [[333]]}}, {3, {["c"], [[999]]}}],
+	             ResultAsPairs).
 
 -endif.
