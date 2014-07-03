@@ -4,7 +4,7 @@
 -type where_cond() :: {term(), term()} | iodata().
 
 %% @doc An SQL SELECT query. See make_select/4 for documentation.
--record(sqlquery, {select      :: iodata(),
+-record(sqlquery, {select      :: [iodata()],
                    from   = [] :: iodata(),
                    where  = [] :: [where_cond()],
                    other  = [] :: iodata()}).
