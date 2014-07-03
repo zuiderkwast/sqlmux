@@ -30,7 +30,7 @@
 -type sqlquery() :: #sqlquery{}.
 
 %% @doc Constructs a sqlquery(). See create_query/4.
--spec create_query(Select::[term()], From::iolist(), Where::[where_cond()]) -> sqlquery().
+-spec create_query(Select::[iodata()], From::iodata(), Where::[where_cond()]) -> sqlquery().
 create_query(Select, From, Where) ->
 	#sqlquery{select = Select, from = From, where = Where}.
 
@@ -47,7 +47,7 @@ create_query(Select, From, Where) ->
 %% condition "Column = Value". In the latter, Value is an unquoted value.
 %%
 %% Other may be anything after the WHERE clause, s.t. ORDER BY or FOR UPDATE, as SQL code.
--spec create_query(Select::[term()], From::iolist(), Where::[where_cond()], Other::iolist()) ->
+-spec create_query(Select::[iodata()], From::iodata(), Where::[where_cond()], Other::iodata()) ->
 	sqlquery().
 create_query(Select, From, Where, Other) ->
 	#sqlquery{select = Select, from = From, where = Where, other = Other}.
